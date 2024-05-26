@@ -53,8 +53,16 @@ where
         }],
     };
 
+    dbg!(&root, &exact_deps);
+
+    let dependency_provider =
+        DependencyProvider::new(package_fetcher, provided_packages, root, locked, exact_deps);
+    let dependency_provider = DependencyProviderProxy {
+        provider: dependency_provider,
+    };
+
     let packages = pubgrub::solver::resolve(
-        &DependencyProvider::new(package_fetcher, provided_packages, root, locked, exact_deps),
+        &dependency_provider,
         root_name.as_str().into(),
         root_version,
     )
@@ -275,6 +283,42 @@ impl<'a> pubgrub::solver::DependencyProvider<PackageName, Version> for Dependenc
             let _ = deps.insert(name.clone(), range);
         }
         Ok(Dependencies::Known(deps))
+    }
+}
+
+struct DependencyProviderProxy<'a> {
+    provider: DependencyProvider<'a>,
+}
+
+impl<'a> pubgrub::solver::DependencyProvider<PackageName, Version> for DependencyProviderProxy<'a> {
+    fn choose_package_version<Name: Borrow<PackageName>, Ver: Borrow<PubgrubRange>>(
+        &self,
+        potential_packages: impl Iterator<Item = (Name, Ver)>,
+    ) -> Result<(Name, Option<Version>), Box<dyn StdError>> {
+        let result = self.provider.choose_package_version(potential_packages);
+        println!(
+            "choose_package_version returned {:?}",
+            result
+                .as_ref()
+                .map(|(name, version)| { (name.borrow().to_string(), version) })
+        );
+        result
+    }
+
+    fn get_dependencies(
+        &self,
+        name: &PackageName,
+        version: &Version,
+    ) -> Result<Dependencies<PackageName, Version>, Box<dyn StdError>> {
+        let result = self.provider.get_dependencies(name, version);
+        println!(
+            "get_dependencies({name}, {version}) returned {:?}",
+            result.as_ref().map(|deps| match deps {
+                Dependencies::Unknown => "Unknown".to_string(),
+                Dependencies::Known(deps) => format!("{deps:?}"),
+            })
+        );
+        result
     }
 }
 
