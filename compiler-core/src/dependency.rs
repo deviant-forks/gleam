@@ -233,7 +233,8 @@ impl<'a> pubgrub::solver::DependencyProvider<PackageName, Version> for Dependenc
         let list_available_versions = |name: &String| {
             let name = name.as_str();
             let exact_package = self.exact_only.get(name);
-            self.packages
+            let versions = self
+                .packages
                 .borrow()
                 .get(name)
                 .cloned()
@@ -248,6 +249,22 @@ impl<'a> pubgrub::solver::DependencyProvider<PackageName, Version> for Dependenc
                         })
                 })
                 .map(|p| p.version)
+                .collect::<Vec<_>>();
+
+            // for version in versions.iter() {
+            //     println!(
+            //         "this.available_versions.entry(\"{name}\".to_string()).or_default().push(Version::parse(\"{version}\").unwrap());");
+            // }
+
+            // println!(
+            //     "this.available_versions.entry(\"{name}\".to_string()).or_default() has the following versions: {:?}",
+            //     versions
+            //         .iter()
+            //         .map(|version| version.to_string())
+            //         .collect::<Vec<_>>()
+            // );
+
+            versions.into_iter()
         };
         Ok(choose_package_with_fewest_versions(
             list_available_versions,
@@ -296,12 +313,12 @@ impl<'a> pubgrub::solver::DependencyProvider<PackageName, Version> for Dependenc
         potential_packages: impl Iterator<Item = (Name, Ver)>,
     ) -> Result<(Name, Option<Version>), Box<dyn StdError>> {
         let result = self.provider.choose_package_version(potential_packages);
-        println!(
-            "choose_package_version returned {:?}",
-            result
-                .as_ref()
-                .map(|(name, version)| { (name.borrow().to_string(), version) })
-        );
+        // println!(
+        //     "choose_package_version returned {:?}",
+        //     result
+        //         .as_ref()
+        //         .map(|(name, version)| { (name.borrow().to_string(), version) })
+        // );
         result
     }
 
@@ -311,14 +328,223 @@ impl<'a> pubgrub::solver::DependencyProvider<PackageName, Version> for Dependenc
         version: &Version,
     ) -> Result<Dependencies<PackageName, Version>, Box<dyn StdError>> {
         let result = self.provider.get_dependencies(name, version);
-        println!(
-            "get_dependencies({name}, {version}) returned {:?}",
-            result.as_ref().map(|deps| match deps {
-                Dependencies::Unknown => "Unknown".to_string(),
-                Dependencies::Known(deps) => format!("{deps:?}"),
-            })
-        );
+
+        if let Ok(result) = result.as_ref() {
+            match result {
+                Dependencies::Unknown => {
+                    println!("this.dependencies.entry((\"{name}\".to_string(), Version::parse(\"{version}\").unwrap())).or_default().push(Dependencies::Unknown);");
+                }
+                Dependencies::Known(deps) => {
+                    let deps_literal = format!(
+                        "HashMap::from_iter([{}])",
+                        deps.into_iter()
+                            .map(|(name, version_range)| {
+                                // dbg!(&version_range);
+                                format!(
+                                    "(\"{name}\", hexpm::version::Range::new(\"{}\".to_string()).to_pubgrub().unwrap())",
+                                    version_range.to_string()
+                                )
+                            })
+                            .collect::<Vec<_>>()
+                            .join(",\n")
+                    );
+
+                    println!("this.dependencies.insert((\"{name}\".to_string(), Version::parse(\"{version}\").unwrap()), Dependencies::Known({deps_literal}));");
+                    // for (name, version_range) in deps {
+                    // }
+                }
+            }
+        }
+
+        // println!(
+        //     "get_dependencies({name}, {version}) returned {:?}",
+        //     result.as_ref().map(|deps| match deps {
+        //         Dependencies::Unknown => "Unknown".to_string(),
+        //         Dependencies::Known(deps) => format!("{deps:?}"),
+        //     })
+        // );
         result
+    }
+}
+
+struct Issue3201DependencyProvider {
+    available_versions: HashMap<PackageName, Vec<Version>>,
+    dependencies: HashMap<(PackageName, Version), Dependencies<PackageName, Version>>,
+}
+
+impl pubgrub::solver::DependencyProvider<PackageName, Version> for Issue3201DependencyProvider {
+    fn choose_package_version<Name: Borrow<PackageName>, Ver: Borrow<PubgrubRange>>(
+        &self,
+        potential_packages: impl Iterator<Item = (Name, Ver)>,
+    ) -> Result<(Name, Option<Version>), Box<dyn StdError>> {
+        Ok(choose_package_with_fewest_versions(
+            |name: &String| {
+                let Some(available_versions) = self.available_versions.get(name) else {
+                    return Vec::new().into_iter();
+                };
+
+                available_versions.clone().into_iter()
+            },
+            potential_packages.into_iter(),
+        ))
+    }
+
+    fn get_dependencies(
+        &self,
+        name: &PackageName,
+        version: &Version,
+    ) -> Result<Dependencies<PackageName, Version>, Box<dyn StdError>> {
+        todo!()
+    }
+}
+
+impl Issue3201DependencyProvider {
+    pub fn new() -> Self {
+        let mut this = Self {
+            available_versions: HashMap::default(),
+            dependencies: HashMap::default(),
+        };
+
+        this.available_versions
+            .entry("gleam_add_issue_2024_05_26".to_string())
+            .or_default()
+            .push(Version::parse("0.0.0").unwrap());
+        this.available_versions
+            .entry("argv".to_string())
+            .or_default()
+            .push(Version::parse("1.0.2").unwrap());
+        this.available_versions
+            .entry("birl".to_string())
+            .or_default()
+            .push(Version::parse("1.7.0").unwrap());
+        this.available_versions
+            .entry("gleam_javascript".to_string())
+            .or_default()
+            .push(Version::parse("0.8.0").unwrap());
+        this.available_versions
+            .entry("gleam_community_colour".to_string())
+            .or_default()
+            .push(Version::parse("1.4.0").unwrap());
+        this.available_versions
+            .entry("gleam_community_ansi".to_string())
+            .or_default()
+            .push(Version::parse("1.4.0").unwrap());
+        this.available_versions
+            .entry("gleam_erlang".to_string())
+            .or_default()
+            .push(Version::parse("0.25.0").unwrap());
+        this.available_versions
+            .entry("tom".to_string())
+            .or_default()
+            .push(Version::parse("0.3.0").unwrap());
+        this.available_versions
+            .entry("thoas".to_string())
+            .or_default()
+            .push(Version::parse("1.2.1").unwrap());
+        this.available_versions
+            .entry("glint".to_string())
+            .or_default()
+            .push(Version::parse("1.0.0 - rc2").unwrap());
+        this.available_versions
+            .entry("wisp".to_string())
+            .or_default()
+            .push(Version::parse("0.14.0").unwrap());
+        this.available_versions
+            .entry("wisp".to_string())
+            .or_default()
+            .push(Version::parse("0.13.0").unwrap());
+        this.available_versions
+            .entry("wisp".to_string())
+            .or_default()
+            .push(Version::parse("0.12.0").unwrap());
+        this.available_versions
+            .entry("wisp".to_string())
+            .or_default()
+            .push(Version::parse("0.11.0").unwrap());
+        this.available_versions
+            .entry("wisp".to_string())
+            .or_default()
+            .push(Version::parse("0.10.0").unwrap());
+        this.available_versions
+            .entry("wisp".to_string())
+            .or_default()
+            .push(Version::parse("0.9.0").unwrap());
+        this.available_versions
+            .entry("wisp".to_string())
+            .or_default()
+            .push(Version::parse("0.8.0").unwrap());
+        this.available_versions
+            .entry("wisp".to_string())
+            .or_default()
+            .push(Version::parse("0.7.0").unwrap());
+        this.available_versions
+            .entry("wisp".to_string())
+            .or_default()
+            .push(Version::parse("0.6.0").unwrap());
+        this.available_versions
+            .entry("wisp".to_string())
+            .or_default()
+            .push(Version::parse("0.5.0").unwrap());
+        this.available_versions
+            .entry("wisp".to_string())
+            .or_default()
+            .push(Version::parse("0.4.0").unwrap());
+        this.available_versions
+            .entry("wisp".to_string())
+            .or_default()
+            .push(Version::parse("0.3.0").unwrap());
+        this.available_versions
+            .entry("wisp".to_string())
+            .or_default()
+            .push(Version::parse("0.2.0").unwrap());
+        this.available_versions
+            .entry("wisp".to_string())
+            .or_default()
+            .push(Version::parse("0.1.0").unwrap());
+        this.available_versions
+            .entry("snag".to_string())
+            .or_default()
+            .push(Version::parse("0.3.0").unwrap());
+        this.available_versions
+            .entry("gleam_otp".to_string())
+            .or_default()
+            .push(Version::parse("0.10.0").unwrap());
+        this.available_versions
+            .entry("exception".to_string())
+            .or_default()
+            .push(Version::parse("2.0.0").unwrap());
+        this.available_versions
+            .entry("ranger".to_string())
+            .or_default()
+            .push(Version::parse("1.2.0").unwrap());
+        this.available_versions
+            .entry("simplifile".to_string())
+            .or_default()
+            .push(Version::parse("1.7.0").unwrap());
+        this.available_versions
+            .entry("filepath".to_string())
+            .or_default()
+            .push(Version::parse("1.0.0").unwrap());
+        this.available_versions
+            .entry("startest".to_string())
+            .or_default()
+            .push(Version::parse("0.2.4").unwrap());
+        this.available_versions
+            .entry("gleam_json".to_string())
+            .or_default()
+            .push(Version::parse("1.0.1").unwrap());
+        this.available_versions
+            .entry("bigben".to_string())
+            .or_default()
+            .push(Version::parse("1.0.0").unwrap());
+        this.available_versions
+            .entry("gleam_stdlib".to_string())
+            .or_default()
+            .push(Version::parse("0.38.0").unwrap());
+
+        //
+
+        this
     }
 }
 
@@ -740,5 +966,18 @@ mod tests {
         );
         assert_eq!(parse_exact_version("~> 1.0.0"), None);
         assert_eq!(parse_exact_version(">= 1.0.0"), None);
+    }
+
+    #[test]
+    fn issue_3201_reproduction_test() {
+        let dependency_provider = Issue3201DependencyProvider::new();
+
+        let result = pubgrub::solver::resolve(
+            &dependency_provider,
+            "gleam_add_issue_2024_05_26".into(),
+            Version::new(0, 0, 0),
+        );
+
+        assert!(result.is_ok());
     }
 }
